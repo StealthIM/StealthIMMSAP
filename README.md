@@ -1,6 +1,10 @@
-# StealthIM Session
+# StealthIM MSAP
 
-Session ID 管理 `0.0.1`
+消息系统 `0.0.1`
+
+提供消息存储、消息转发等功能。
+
+本模块需要部署 nats 作为依赖。
 
 > `.proto` 文件：`./proto/session.proto`
 
@@ -8,7 +12,7 @@ Session ID 管理 `0.0.1`
 
 ### 依赖
 
-Go 版本：`1.24.2`
+Go 版本：`1.24.4`
 
 软件包：`protobuf` `protobuf-dev` `make`
 

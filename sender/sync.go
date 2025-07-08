@@ -218,15 +218,27 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 				fileHash := row.Result[5].GetStr()
 				msgType := row.Result[6].GetUint32()
 
-				messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
-					Msgid:   int64(msgID),
-					Groupid: int64(groupID),
-					Msg:     msgContent,
-					Uid:     uid,
-					Hash:    fileHash,
-					Type:    pb.MessageType(msgType),
-					Time:    msgTime,
-				})
+				// 处理 recall 消息
+				if msgType >= 16 { // 根据用户定义，type >= 16 表示 recall 消息
+					messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
+						Msgid:   int64(msgID),
+						Groupid: int64(groupID),
+						Uid:     uid,
+						Type:    pb.MessageType(msgType),
+						Time:    msgTime,
+						// Msg, Hash, Username 字段在此处留空，因为它们应该为 null
+					})
+				} else {
+					messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
+						Msgid:   int64(msgID),
+						Groupid: int64(groupID),
+						Msg:     msgContent,
+						Uid:     uid,
+						Hash:    fileHash,
+						Type:    pb.MessageType(msgType),
+						Time:    msgTime,
+					})
+				}
 				currentBatchLastMsgID = int64(msgID)
 			}
 

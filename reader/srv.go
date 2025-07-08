@@ -4,7 +4,7 @@ import (
 	pb "StealthIMMSAP/StealthIM.MSAP"
 	"StealthIMMSAP/config"
 	"StealthIMMSAP/errorcode"
-	"StealthIMMSAP/nats"
+	stealthimnats "StealthIMMSAP/nats" // 使用别名 stealthimnats
 	"context"
 	"log"
 	"time"
@@ -65,7 +65,7 @@ func (*server) SendMessage(ctx context.Context, req *pb.SendMessageRequest) (*pb
 	}
 	var err error
 	for i := range 3 { // 最多重试3次
-		err = nats.Publish(nats.SubjectMessage, publishMsg)
+		err = stealthimnats.Publish(stealthimnats.SubjectMessage, publishMsg)
 		if err == nil {
 			break // 成功则跳出循环
 		}
@@ -130,31 +130,35 @@ func (*server) RecallMessage(ctx context.Context, req *pb.RecallMessageRequest) 
 			},
 		}, nil
 	}
+
+	// 发布 NATS 消息通知客户端，由 subscriber 执行数据库更新
 	publishMsg := &pb.N_BroadcastMessage{
 		Writer:    WriterKey,
 		Writetime: time.Now().UnixNano(),
-		Action:    pb.N_MessageAction_PreWrite,
+		Action:    pb.N_MessageAction_PreRecall,
 		Content: &pb.N_MessageContent{
 			Uid:     req.Uid,
 			Groupid: req.Groupid,
 			Time:    time.Now().UnixNano(),
 			Msgid:   req.Msgid,
+			Type:    pb.MessageType_Recall_Text, // 使用默认的 Recall_Text 类型
+			Content: "",
 		},
 	}
-	var err error
+	var errPublish error
 	for i := range 3 { // 最多重试3次
-		err = nats.Publish(nats.SubjectMessage, publishMsg)
-		if err == nil {
+		errPublish = stealthimnats.Publish(stealthimnats.SubjectMessage, publishMsg)
+		if errPublish == nil {
 			break // 成功则跳出循环
 		}
 		if config.LatestConfig.SendGRPCProxy.Log {
-			log.Printf("[MSAP]Publish message failed, retrying (%d/3): %v", i+1, err)
+			log.Printf("[MSAP]Publish recall message failed, retrying (%d/3): %v", i+1, errPublish)
 		}
 		time.Sleep(1 * time.Second) // 重试间隔1秒
 	}
 
-	if err != nil {
-		switch err.Error() {
+	if errPublish != nil {
+		switch errPublish.Error() {
 		case "No available connections":
 			return &pb.RecallMessageResponse{
 				Result: &pb.Result{
@@ -172,6 +176,94 @@ func (*server) RecallMessage(ctx context.Context, req *pb.RecallMessageRequest) 
 		}
 	}
 	return &pb.RecallMessageResponse{
+		Result: &pb.Result{
+			Code: errorcode.Success,
+			Msg:  "",
+		},
+	}, nil
+}
+
+// FileAPICall 处理发送消息请求
+func (*server) FileAPICall(ctx context.Context, req *pb.FileAPICallRequest) (*pb.FileAPICallResponse, error) {
+	if config.LatestConfig.SendGRPCProxy.Log {
+		log.Printf("[MSAP]Call SendMessage")
+	}
+	if req.Uid == 0 {
+		return &pb.FileAPICallResponse{
+			Result: &pb.Result{
+				Code: errorcode.MSAPUIDEmpty,
+				Msg:  "UID is empty",
+			},
+		}, nil
+	}
+	if req.Groupid == 0 {
+		return &pb.FileAPICallResponse{
+			Result: &pb.Result{
+				Code: errorcode.MSAPGroupIDEmpty,
+				Msg:  "GroupID is empty",
+			},
+		}, nil
+	}
+	if req.Hash == "" {
+		return &pb.FileAPICallResponse{
+			Result: &pb.Result{
+				Code: errorcode.MSAPContentEmpty,
+				Msg:  "Content Hash is empty",
+			},
+		}, nil
+	}
+	if req.Filename == "" {
+		return &pb.FileAPICallResponse{
+			Result: &pb.Result{
+				Code: errorcode.MSAPContentEmpty,
+				Msg:  "Content Filename is empty",
+			},
+		}, nil
+	}
+	publishMsg := &pb.N_BroadcastMessage{
+		Writer:    WriterKey,
+		Writetime: time.Now().UnixNano(),
+		Action:    pb.N_MessageAction_PreWrite,
+		Content: &pb.N_MessageContent{
+			Uid:      req.Uid,
+			Groupid:  req.Groupid,
+			Content:  req.Filename,
+			Type:     pb.MessageType_File,
+			Time:     time.Now().UnixNano(),
+			FileHash: req.Hash,
+		},
+	}
+	var err error
+	for i := range 3 { // 最多重试3次
+		err = stealthimnats.Publish(stealthimnats.SubjectMessage, publishMsg)
+		if err == nil {
+			break // 成功则跳出循环
+		}
+		if config.LatestConfig.SendGRPCProxy.Log {
+			log.Printf("[MSAP]Publish message failed, retrying (%d/3): %v", i+1, err)
+		}
+		time.Sleep(1 * time.Second) // 重试间隔1秒
+	}
+
+	if err != nil {
+		switch err.Error() {
+		case "No available connections":
+			return &pb.FileAPICallResponse{
+				Result: &pb.Result{
+					Code: errorcode.ServerInternalNetworkError,
+					Msg:  "No available connections with NATS server",
+				},
+			}, nil
+		default:
+			return &pb.FileAPICallResponse{
+				Result: &pb.Result{
+					Code: errorcode.ServerInternalComponentError,
+					Msg:  "Server internal component error",
+				},
+			}, nil
+		}
+	}
+	return &pb.FileAPICallResponse{
 		Result: &pb.Result{
 			Code: errorcode.Success,
 			Msg:  "",

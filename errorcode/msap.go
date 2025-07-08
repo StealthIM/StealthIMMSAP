@@ -15,4 +15,8 @@ const (
 	MSAPMsgIDEmpty
 	// MSAPContentTooLong 传入的MsgID为空
 	MSAPContentTooLong
+	// MSAPMessageNotFound 消息未找到
+	MSAPMessageNotFound
+	// MSAPPermissionDenied 权限不足
+	MSAPPermissionDenied
 )
