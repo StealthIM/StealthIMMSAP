@@ -1,0 +1,27 @@
+[send]
+host = "127.0.0.1" # GRPC地址
+port = 50056       # GRPC监听端口
+log = false        # 启用日志，调试功能，上线建议关闭
+
+[sync]
+host = "127.0.0.1" # GRPC地址
+port = 50057       # GRPC监听端口
+log = false        # 启用日志，调试功能，上线建议关闭
+
+[dbgateway]
+host = "127.0.0.1"
+port = 50051
+conn_num = 5
+sql_timeout = 5000 # 单位：ms
+
+[nats]
+host = "127.0.0.1"
+port = 4222
+username = "root"
+password = "xxxxxxxx"
+conn_num = 5
+
+[database]
+check_split_interval = 900 # 检查分表间隔，单位 s
+max_msg_size = 4           # 最大消息大小，单位 KiB
+partition_size = 12000000  # 分表条数

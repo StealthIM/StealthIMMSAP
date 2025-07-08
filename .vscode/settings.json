@@ -1,0 +1,13 @@
+{
+    "makefile.configureOnOpen": false,
+    "github.copilot.chat.codeGeneration.instructions": [
+        {
+            "file": ".cursor/document/Coding_Standards.md",
+            "language": "markdown"
+        },
+        {
+            "file": ".cursor/document/SDK_Usage_Guide.md",
+            "language": "markdown"
+        }
+    ]
+}
