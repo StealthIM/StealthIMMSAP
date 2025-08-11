@@ -165,7 +165,7 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 				log.Printf("[SYNCER]Cache miss for group %d, lastMsgID %d. Querying DB.", req.Groupid, LastMsgID)
 			}
 			sqlReq := &pbgtw.SqlRequest{
-				Sql: "SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type FROM msg WHERE group_id = ? AND msg_id > ? ORDER BY msg_id ASC LIMIT 32;", // 每次最多拉取32条
+				Sql: "SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id > ? ORDER BY msg_id ASC LIMIT 32;", // 每次最多拉取32条
 				Db:  pbgtw.SqlDatabases_Msg,
 				Params: []*pbgtw.InterFaceType{
 					{Response: &pbgtw.InterFaceType_Int64{Int64: req.Groupid}},
@@ -217,26 +217,29 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 				uid := row.Result[4].GetInt32()
 				fileHash := row.Result[5].GetStr()
 				msgType := row.Result[6].GetUint32()
+				msgSender := row.Result[7].GetStr()
 
 				// 处理 recall 消息
 				if msgType >= 16 { // 根据用户定义，type >= 16 表示 recall 消息
 					messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
-						Msgid:   int64(msgID),
-						Groupid: int64(groupID),
-						Uid:     uid,
-						Type:    pb.MessageType(msgType),
-						Time:    msgTime,
+						Msgid:    int64(msgID),
+						Groupid:  int64(groupID),
+						Uid:      uid,
+						Type:     pb.MessageType(msgType),
+						Time:     msgTime,
+						Username: msgSender,
 						// Msg, Hash, Username 字段在此处留空，因为它们应该为 null
 					})
 				} else {
 					messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
-						Msgid:   int64(msgID),
-						Groupid: int64(groupID),
-						Msg:     msgContent,
-						Uid:     uid,
-						Hash:    fileHash,
-						Type:    pb.MessageType(msgType),
-						Time:    msgTime,
+						Msgid:    int64(msgID),
+						Groupid:  int64(groupID),
+						Msg:      msgContent,
+						Uid:      uid,
+						Hash:     fileHash,
+						Type:     pb.MessageType(msgType),
+						Time:     msgTime,
+						Username: msgSender,
 					})
 				}
 				currentBatchLastMsgID = int64(msgID)

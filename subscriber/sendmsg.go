@@ -46,7 +46,7 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 		var msgid int64 = -1
 
 		// 写入消息到数据库
-		sql := "INSERT INTO msg (group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type) VALUES (?, ?, FROM_UNIXTIME(?), ?, ?, ?)"
+		sql := "INSERT INTO msg (group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender) VALUES (?, ?, FROM_UNIXTIME(?), ?, ?, ?, ?)"
 		params := []*pbgtw.InterFaceType{
 			{Response: &pbgtw.InterFaceType_Int64{Int64: in.Content.Groupid}},
 			{Response: &pbgtw.InterFaceType_Str{Str: in.Content.Content}},
@@ -54,6 +54,7 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 			{Response: &pbgtw.InterFaceType_Int32{Int32: in.Content.Uid}},
 			{Response: &pbgtw.InterFaceType_Str{Str: in.Content.FileHash}}, // 使用 N_MessageContent 中的 file_hash
 			{Response: &pbgtw.InterFaceType_Int32{Int32: int32(in.Content.Type)}},
+			{Response: &pbgtw.InterFaceType_Str{Str: (in.Content.Username)}},
 		}
 
 		var sqlRes *pbgtw.SqlResponse
@@ -106,13 +107,14 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 				Time:   in.Content.Time,
 				Msg: []*pb.ReciveMessageListen{
 					{
-						Msgid:   msgid,
-						Uid:     in.Content.Uid,
-						Groupid: in.Content.Groupid,
-						Msg:     in.Content.Content,
-						Type:    in.Content.Type,
-						Hash:    in.Content.FileHash, // 使用 N_MessageContent 中的 file_hash
-						Time:    in.Content.Time / 1000000000,
+						Msgid:    msgid,
+						Uid:      in.Content.Uid,
+						Groupid:  in.Content.Groupid,
+						Msg:      in.Content.Content,
+						Type:     in.Content.Type,
+						Hash:     in.Content.FileHash, // 使用 N_MessageContent 中的 file_hash
+						Time:     in.Content.Time / 1000000000,
+						Username: in.Content.Username,
 					},
 				},
 			})
@@ -181,11 +183,12 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 				Time:   in.Content.Time,
 				Msg: []*pb.ReciveMessageListen{
 					{
-						Msgid:   in.Content.Msgid,
-						Uid:     in.Content.Uid,
-						Groupid: in.Content.Groupid,
-						Type:    in.Content.Type, // 应该是 recall 类型
-						Time:    in.Content.Time / 1000000000,
+						Msgid:    in.Content.Msgid,
+						Uid:      in.Content.Uid,
+						Groupid:  in.Content.Groupid,
+						Type:     in.Content.Type, // 应该是 recall 类型
+						Time:     in.Content.Time / 1000000000,
+						Username: in.Content.Username,
 						// Msg, Hash, Username 字段留空
 					},
 				},

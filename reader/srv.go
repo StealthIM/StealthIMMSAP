@@ -5,6 +5,7 @@ import (
 	"StealthIMMSAP/config"
 	"StealthIMMSAP/errorcode"
 	stealthimnats "StealthIMMSAP/nats" // 使用别名 stealthimnats
+	"StealthIMMSAP/user"
 	"context"
 	"log"
 	"time"
@@ -49,18 +50,29 @@ func (*server) SendMessage(ctx context.Context, req *pb.SendMessageRequest) (*pb
 				Msg:  "Content too long",
 			},
 		}, nil
-
 	}
+
+	username, err2 := user.QueryUsernameByUID(ctx, req.Uid)
+	if err2 != nil {
+		return &pb.SendMessageResponse{
+			Result: &pb.Result{
+				Code: errorcode.ServerInternalComponentError,
+				Msg:  "Server internal component error",
+			},
+		}, nil
+	}
+
 	publishMsg := &pb.N_BroadcastMessage{
 		Writer:    WriterKey,
 		Writetime: time.Now().UnixNano(),
 		Action:    pb.N_MessageAction_PreWrite,
 		Content: &pb.N_MessageContent{
-			Uid:     req.Uid,
-			Groupid: req.Groupid,
-			Content: req.Msg,
-			Type:    req.Type,
-			Time:    time.Now().UnixNano(),
+			Uid:      req.Uid,
+			Groupid:  req.Groupid,
+			Content:  req.Msg,
+			Type:     req.Type,
+			Time:     time.Now().UnixNano(),
+			Username: username,
 		},
 	}
 	var err error
@@ -131,18 +143,29 @@ func (*server) RecallMessage(ctx context.Context, req *pb.RecallMessageRequest) 
 		}, nil
 	}
 
+	username, err2 := user.QueryUsernameByUID(ctx, req.Uid)
+	if err2 != nil {
+		return &pb.RecallMessageResponse{
+			Result: &pb.Result{
+				Code: errorcode.ServerInternalComponentError,
+				Msg:  "Server internal component error",
+			},
+		}, nil
+	}
+
 	// 发布 NATS 消息通知客户端，由 subscriber 执行数据库更新
 	publishMsg := &pb.N_BroadcastMessage{
 		Writer:    WriterKey,
 		Writetime: time.Now().UnixNano(),
 		Action:    pb.N_MessageAction_PreRecall,
 		Content: &pb.N_MessageContent{
-			Uid:     req.Uid,
-			Groupid: req.Groupid,
-			Time:    time.Now().UnixNano(),
-			Msgid:   req.Msgid,
-			Type:    pb.MessageType_Recall_Text, // 使用默认的 Recall_Text 类型
-			Content: "",
+			Uid:      req.Uid,
+			Groupid:  req.Groupid,
+			Time:     time.Now().UnixNano(),
+			Msgid:    req.Msgid,
+			Type:     pb.MessageType_Recall_Text, // 使用默认的 Recall_Text 类型
+			Content:  "",
+			Username: username,
 		},
 	}
 	var errPublish error
@@ -220,6 +243,17 @@ func (*server) FileAPICall(ctx context.Context, req *pb.FileAPICallRequest) (*pb
 			},
 		}, nil
 	}
+
+	username, err2 := user.QueryUsernameByUID(ctx, req.Uid)
+	if err2 != nil {
+		return &pb.FileAPICallResponse{
+			Result: &pb.Result{
+				Code: errorcode.ServerInternalComponentError,
+				Msg:  "Server internal component error",
+			},
+		}, nil
+	}
+
 	publishMsg := &pb.N_BroadcastMessage{
 		Writer:    WriterKey,
 		Writetime: time.Now().UnixNano(),
@@ -231,6 +265,7 @@ func (*server) FileAPICall(ctx context.Context, req *pb.FileAPICallRequest) (*pb
 			Type:     pb.MessageType_File,
 			Time:     time.Now().UnixNano(),
 			FileHash: req.Hash,
+			Username: username,
 		},
 	}
 	var err error

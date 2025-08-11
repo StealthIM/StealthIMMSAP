@@ -14,6 +14,11 @@ port = 50051
 conn_num = 5
 sql_timeout = 5000 # 单位：ms
 
+[user]
+host = "127.0.0.1"
+port = 50055
+conn_num = 5
+
 [nats]
 host = "127.0.0.1"
 port = 4222

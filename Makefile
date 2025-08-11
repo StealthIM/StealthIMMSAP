@@ -23,11 +23,14 @@ run: build
 StealthIM.DBGateway/db_gateway_grpc.pb.go StealthIM.DBGateway/db_gateway.pb.go: proto/db_gateway.proto
 	$(PROTOCCMD) --plugin=protoc-gen-go=$(PROTOGEN_PATH) --plugin=protoc-gen-go-grpc=$(PROTOGENGRPC_PATH) --go-grpc_out=. --go_out=. proto/db_gateway.proto
 
+StealthIM.User/user_grpc.pb.go StealthIM.User/user.pb.go: proto/user.proto
+	$(PROTOCCMD) --plugin=protoc-gen-go=$(PROTOGEN_PATH) --plugin=protoc-gen-go-grpc=$(PROTOGENGRPC_PATH) --go-grpc_out=. --go_out=. proto/user.proto
+
 StealthIM.MSAP/msap_grpc.pb.go StealthIM.MSAP/msap.pb.go: proto/msap.proto
 	$(PROTOCCMD) --plugin=protoc-gen-go=$(PROTOGEN_PATH) --plugin=protoc-gen-go-grpc=$(PROTOGENGRPC_PATH) --go-grpc_out=. --go_out=. proto/msap.proto
 
 .PHONY: proto
-proto: ./StealthIM.DBGateway/db_gateway_grpc.pb.go ./StealthIM.DBGateway/db_gateway.pb.go ./StealthIM.MSAP/msap_grpc.pb.go ./StealthIM.MSAP/msap.pb.go
+proto: ./StealthIM.DBGateway/db_gateway_grpc.pb.go ./StealthIM.DBGateway/db_gateway.pb.go ./StealthIM.MSAP/msap_grpc.pb.go ./StealthIM.MSAP/msap.pb.go StealthIM.User/user_grpc.pb.go StealthIM.User/user.pb.go
 
 .PHONY: build
 build: ./bin/$(DEFAULT_BUILD_FILENAME)

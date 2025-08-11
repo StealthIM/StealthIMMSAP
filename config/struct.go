@@ -5,9 +5,9 @@ type Config struct {
 	DBGateway     DBGatewayConfig     `toml:"dbgateway"`
 	SendGRPCProxy SyncGRPCProxyConfig `toml:"send"`
 	SyncGRPCProxy SyncGRPCProxyConfig `toml:"sync"`
-	Session       SessionConfig       `toml:"session"`
 	Nats          NATSConfig          `toml:"nats"`
 	Database      DatabaseConfig      `toml:"database"`
+	User          UserConfig          `toml:"user"`
 }
 
 // SendGRPCProxyConfig grpc Server配置
@@ -32,8 +32,8 @@ type DBGatewayConfig struct {
 	Timeout int    `toml:"sql_timeout"`
 }
 
-// SessionConfig grpc Session 配置
-type SessionConfig struct {
+// UserConfig grpc User 配置
+type UserConfig struct {
 	Host    string `toml:"host"`
 	Port    int    `toml:"port"`
 	ConnNum int    `toml:"conn_num"`

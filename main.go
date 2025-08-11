@@ -8,6 +8,7 @@ import (
 	"StealthIMMSAP/sender"
 	"StealthIMMSAP/spliter"
 	"StealthIMMSAP/subscriber"
+	"StealthIMMSAP/user"
 	"log"
 	"os"
 )
@@ -22,16 +23,16 @@ func main() {
 	log.Printf("    Host: %s\n", cfg.DBGateway.Host)
 	log.Printf("    Port: %d\n", cfg.DBGateway.Port)
 	log.Printf("    ConnNum: %d\n", cfg.DBGateway.ConnNum)
-	log.Printf("+ Session\n")
-	log.Printf("    Host: %s\n", cfg.Session.Host)
-	log.Printf("    Port: %d\n", cfg.Session.Port)
-	log.Printf("    ConnNum: %d\n", cfg.Session.ConnNum)
+	log.Printf("+ User\n")
+	log.Printf("    Host: %s\n", cfg.User.Host)
+	log.Printf("    Port: %d\n", cfg.User.Port)
+	log.Printf("    ConnNum: %d\n", cfg.User.ConnNum)
 	log.Printf("+ NATS\n")
 	log.Printf("    Host: %s\n", cfg.Nats.Host)
 	log.Printf("    Port: %d\n", cfg.Nats.Port)
 	log.Printf("    Username: %s\n", cfg.Nats.Username)
 	log.Printf("    Password: **********\n")
-	log.Printf("    ConnNum: %d\n", cfg.Session.ConnNum)
+	log.Printf("    ConnNum: %d\n", cfg.Nats.ConnNum)
 
 	// 启动 DBGateway
 	go gateway.InitConns()
@@ -52,6 +53,7 @@ func main() {
 	if mode == "" || mode == "sender" {
 		// 启动消息服务
 		sender.Init(cfg)
+		go user.InitConns()
 		go sender.Start(cfg)
 	}
 
