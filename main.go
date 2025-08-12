@@ -40,6 +40,7 @@ func main() {
 	mode := os.Getenv("StealthIMMSAP_MODE")
 	if mode == "" || mode == "grpc" {
 		// 启动 GRPC 服务
+		go user.InitConns()
 		go reader.Start(cfg)
 	}
 	if mode == "" || mode == "subscriber" {
@@ -53,7 +54,6 @@ func main() {
 	if mode == "" || mode == "sender" {
 		// 启动消息服务
 		sender.Init(cfg)
-		go user.InitConns()
 		go sender.Start(cfg)
 	}
 
