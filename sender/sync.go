@@ -19,11 +19,19 @@ import (
 	"google.golang.org/protobuf/proto" // 导入 proto 包
 )
 
+const int64Max = 9223372036854775806
+
 // MaxConnections 每个组的最大连接数
 const MaxConnections = 1000
 
 // CacheTTL 缓存过期时间（秒）
 const CacheTTL = 300 // 5分钟
+
+// GetMessageOnce 单次获取的消息条数
+const GetMessageOnce = 32
+
+// MaxLimit 最大获取消息条数
+const MaxLimit = 256
 
 // ClientConnection 表示单个客户端的 gRPC 流连接
 type ClientConnection struct {
@@ -58,251 +66,267 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 		return nil
 	}
 
-	// 加载或为该 groupid 创建 GroupConnections
-	groupValue, _ := OnlineUsers.LoadOrStore(req.Groupid, &GroupConnections{})
-	groupConns := groupValue.(*GroupConnections)
+	if req.Sync {
+		// 加载或为该 groupid 创建 GroupConnections
+		groupValue, _ := OnlineUsers.LoadOrStore(req.Groupid, &GroupConnections{})
+		groupConns := groupValue.(*GroupConnections)
 
-	groupConns.mu.Lock()
-	if len(groupConns.connections) >= MaxConnections {
-		groupConns.mu.Unlock()
-		if config.LatestConfig.SyncGRPCProxy.Log {
-			log.Printf("[SYNCER]Group %d reached max connections %d", req.Groupid, MaxConnections)
+		groupConns.mu.Lock()
+		if len(groupConns.connections) >= MaxConnections {
+			groupConns.mu.Unlock()
+			if config.LatestConfig.SyncGRPCProxy.Log {
+				log.Printf("[SYNCER]Group %d reached max connections %d", req.Groupid, MaxConnections)
+			}
+			stream.Send(&pb.SyncMessageResponse{
+				Result: &pb.Result{
+					Code: errorcode.ServerOverload,
+					Msg:  "Group connection limit reached",
+				}})
+			time.Sleep(time.Millisecond * 500)
+			return nil
 		}
-		stream.Send(&pb.SyncMessageResponse{
-			Result: &pb.Result{
-				Code: errorcode.ServerOverload,
-				Msg:  "Group connection limit reached",
-			}})
-		time.Sleep(time.Millisecond * 500)
-		return nil
-	}
 
-	// 创建一个新的客户端连接
-	clientConn := &ClientConnection{
-		stream:   stream,
-		sendChan: make(chan *pb.SyncMessageResponse, 100), // 用于消息的缓冲通道
-		done:     make(chan struct{}),
-	}
+		// 创建一个新的客户端连接
+		clientConn := &ClientConnection{
+			stream:   stream,
+			sendChan: make(chan *pb.SyncMessageResponse, 100), // 用于消息的缓冲通道
+			done:     make(chan struct{}),
+		}
 
-	// 将新的客户端连接添加到组中
-	groupConns.connections = append(groupConns.connections, clientConn)
-	groupConns.mu.Unlock()
+		// 将新的客户端连接添加到组中
+		groupConns.connections = append(groupConns.connections, clientConn)
+		groupConns.mu.Unlock()
 
-	// 启动一个 goroutine 向此客户端发送消息
-	go func() {
-		for {
-			select {
-			case msg := <-clientConn.sendChan:
-				if err := clientConn.stream.Send(msg); err != nil {
-					if config.LatestConfig.SyncGRPCProxy.Log {
-						log.Printf("[SYNCER]Error sending message to client: %v", err)
+		// 启动一个 goroutine 向此客户端发送消息
+		go func() {
+			for {
+				select {
+				case msg := <-clientConn.sendChan:
+					if err := clientConn.stream.Send(msg); err != nil {
+						if config.LatestConfig.SyncGRPCProxy.Log {
+							log.Printf("[SYNCER]Error sending message to client: %v", err)
+						}
+						return
 					}
+				case <-clientConn.done:
+					// 连接已完成 退出 goroutine
 					return
 				}
-			case <-clientConn.done:
-				// 连接已完成 退出 goroutine
-				return
 			}
-		}
-	}()
+		}()
 
-	// 客户端断开连接 进行清理
-	defer func() {
-		groupConns.mu.Lock()
-		for i, conn := range groupConns.connections {
-			if conn == clientConn {
-				// 移除已断开连接的客户端连接
-				groupConns.connections = append(groupConns.connections[:i], groupConns.connections[i+1:]...)
-				close(clientConn.done)
-				close(clientConn.sendChan)
-				break
-			}
-		}
-		groupConns.mu.Unlock()
-	}()
-
-	// 拉取过去的消息，从 req.LastMsgid 往后。
-	var LastMsgID = req.LastMsgid
-	for {
-		// 构建 Redis 缓存键
-		// 考虑到每次拉取32条，缓存键可以包含起始和结束消息ID的范围
-		// 但为了简化，先尝试缓存从LastMsgID开始的下一批消息
-		cacheKey := fmt.Sprintf("msap:msg:history:%d:%d", req.Groupid, LastMsgID)
-
-		// 尝试从 Redis 缓存中获取消息
-		getRes, err := gateway.ExecRedisBGet(&pbgtw.RedisGetBytesRequest{
-			DBID: 0, // 假设 DBID 为 0
-			Key:  cacheKey,
-		})
-
-		var messagesToSend []*pb.ReciveMessageListen
-		var currentBatchLastMsgID int64 = LastMsgID
-		var fromCache bool = false
-
-		if err == nil && getRes.Result.Code == errorcode.Success && len(getRes.Value) > 0 {
-			// 缓存命中
-			cachedList := &pb.CachedMessageList{}
-			if err := proto.Unmarshal(getRes.Value, cachedList); err == nil {
-				messagesToSend = cachedList.Messages
-				if len(messagesToSend) > 0 {
-					currentBatchLastMsgID = messagesToSend[len(messagesToSend)-1].Msgid
-					fromCache = true
-					if config.LatestConfig.SyncGRPCProxy.Log {
-						log.Printf("[SYNCER]Cache hit for group %d, lastMsgID %d", req.Groupid, LastMsgID)
-					}
-				}
-			} else {
-				if config.LatestConfig.SyncGRPCProxy.Log {
-					log.Printf("[SYNCER]Failed to unmarshal cached messages for key %s: %v", cacheKey, err)
-				}
-				// 反序列化失败，继续从数据库查询
-			}
-		}
-
-		if !fromCache {
-			// 缓存未命中或反序列化失败，从数据库查询
-			if config.LatestConfig.SyncGRPCProxy.Log {
-				log.Printf("[SYNCER]Cache miss for group %d, lastMsgID %d. Querying DB.", req.Groupid, LastMsgID)
-			}
-			sqlReq := &pbgtw.SqlRequest{
-				Sql: "SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id > ? ORDER BY msg_id ASC LIMIT 32;", // 每次最多拉取32条
-				Db:  pbgtw.SqlDatabases_Msg,
-				Params: []*pbgtw.InterFaceType{
-					{Response: &pbgtw.InterFaceType_Int64{Int64: req.Groupid}},
-					{Response: &pbgtw.InterFaceType_Int64{Int64: int64(LastMsgID)}}, // 类型转换
-				},
-			}
-
-			sqlRes, err := gateway.ExecSQL(sqlReq)
-			if err != nil {
-				stream.Send(&pb.SyncMessageResponse{
-					Result: &pb.Result{
-						Code: errorcode.ServerInternalComponentError,
-						Msg:  "Failed to query historical messages",
-					}})
-				return err
-			}
-
-			if sqlRes.Result.Code != errorcode.Success {
-				stream.Send(&pb.SyncMessageResponse{
-					Result: &pb.Result{
-						Code: sqlRes.Result.Code,
-						Msg:  sqlRes.Result.Msg,
-					},
-					Time: time.Now().Unix(),
-				})
-				return fmt.Errorf("failed to query historical messages: %s", sqlRes.Result.Msg)
-			}
-
-			if len(sqlRes.Data) == 0 {
-				// 没有更多消息，退出循环
-				// 缓存空结果，避免缓存穿透
-				emptyCachedList := &pb.CachedMessageList{}
-				emptyBytes, _ := proto.Marshal(emptyCachedList)
-				gateway.ExecRedisBSet(&pbgtw.RedisSetBytesRequest{
-					DBID:  0,
-					Key:   cacheKey,
-					Value: emptyBytes,
-					Ttl:   CacheTTL, // 缓存空结果也设置 TTL
-				})
-				break
-			}
-
-			messagesToSend = make([]*pb.ReciveMessageListen, 0, len(sqlRes.Data))
-			for _, row := range sqlRes.Data {
-				msgID := row.Result[0].GetUint64()
-				groupID := row.Result[1].GetUint32()
-				msgContent := row.Result[2].GetStr()
-				msgTime := row.Result[3].GetInt64()
-				uid := row.Result[4].GetInt32()
-				fileHash := row.Result[5].GetStr()
-				msgType := row.Result[6].GetUint32()
-				msgSender := row.Result[7].GetStr()
-
-				// 处理 recall 消息
-				if msgType >= 16 { // 根据用户定义，type >= 16 表示 recall 消息
-					messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
-						Msgid:    int64(msgID),
-						Groupid:  int64(groupID),
-						Uid:      uid,
-						Type:     pb.MessageType(msgType),
-						Time:     msgTime,
-						Username: msgSender,
-						// Msg, Hash, Username 字段在此处留空，因为它们应该为 null
-					})
-				} else {
-					messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
-						Msgid:    int64(msgID),
-						Groupid:  int64(groupID),
-						Msg:      msgContent,
-						Uid:      uid,
-						Hash:     fileHash,
-						Type:     pb.MessageType(msgType),
-						Time:     msgTime,
-						Username: msgSender,
-					})
-				}
-				currentBatchLastMsgID = int64(msgID)
-			}
-
-			// 将查询结果写入缓存
-			cachedList := &pb.CachedMessageList{
-				Messages: messagesToSend,
-			}
-			cacheBytes, err := proto.Marshal(cachedList)
-			if err == nil {
-				_, err = gateway.ExecRedisBSet(&pbgtw.RedisSetBytesRequest{
-					DBID:  0, // 假设 DBID 为 0
-					Key:   cacheKey,
-					Value: cacheBytes,
-					Ttl:   CacheTTL,
-				})
-				if err != nil && config.LatestConfig.SyncGRPCProxy.Log {
-					log.Printf("[SYNCER]Failed to set cache for key %s: %v", cacheKey, err)
-				}
-			} else {
-				if config.LatestConfig.SyncGRPCProxy.Log {
-					log.Printf("[SYNCER]Failed to marshal messages for cache: %v", err)
+		// 客户端断开连接 进行清理
+		defer func() {
+			groupConns.mu.Lock()
+			for i, conn := range groupConns.connections {
+				if conn == clientConn {
+					// 移除已断开连接的客户端连接
+					groupConns.connections = append(groupConns.connections[:i], groupConns.connections[i+1:]...)
+					close(clientConn.done)
+					close(clientConn.sendChan)
+					break
 				}
 			}
-		}
-
-		LastMsgID = currentBatchLastMsgID
-
-		// 如果当前批次没有有效消息，则跳过发送并继续下一轮查询
-		if len(messagesToSend) == 0 {
-			break // 避免无限循环，如果SQL返回数据但解析失败导致messagesToSend为空
-		}
-
-		syncMsg := &pb.SyncMessageResponse{
-			Result: &pb.Result{
-				Code: errorcode.Success,
-				Msg:  "",
-			},
-			Time: time.Now().Unix(),
-			Msg:  messagesToSend,
-		}
-
-		// 尝试发送消息，如果失败则重试
-		sendSuccess := false
-		for range 2 { // 尝试发送2次
-			if err := stream.Send(syncMsg); err == nil {
-				sendSuccess = true
-				break
-			}
-			time.Sleep(time.Millisecond * 100) // 短暂等待后重试
-		}
-
-		if !sendSuccess {
-			return fmt.Errorf("failed to send sync message to client")
-		}
-
-		// 更新 req.LastMsgid 以便下次查询从这里开始
-		req.LastMsgid = currentBatchLastMsgID
+			groupConns.mu.Unlock()
+		}()
+	}
+	if req.Limit > MaxLimit {
+		req.Limit = MaxLimit
 	}
 
-	// 等待客户端断开连接
-	<-stream.Context().Done()
+	var lastMessageID int64 = req.LastMsgid
+
+	if req.LastMsgid == 0 {
+		lastMessageID = int64Max
+	}
+
+	receivedMsgNum := 0
+
+	useASCorDESC := "ASC"
+	if req.Prev {
+		useASCorDESC = "DESC"
+	}
+
+	if req.LastMsgid == 0 && !req.Prev {
+		// 无需加载历史
+	} else {
+		for {
+			// 构建 Redis 缓存键
+			cacheKey := fmt.Sprintf("msap:msg:history:%d:%d:%d:%s", req.Groupid, lastMessageID, req.Limit, useASCorDESC)
+
+			// 尝试从 Redis 缓存中获取消息
+			getRes, err := gateway.ExecRedisBGet(&pbgtw.RedisGetBytesRequest{
+				DBID: 0, // 假设 DBID 为 0
+				Key:  cacheKey,
+			})
+
+			var messagesToSend []*pb.ReciveMessageListen
+			var fromCache bool = false
+
+			if err == nil && getRes.Result.Code == errorcode.Success && len(getRes.Value) > 0 {
+				// 缓存命中
+				cachedList := &pb.CachedMessageList{}
+				if err := proto.Unmarshal(getRes.Value, cachedList); err == nil {
+					messagesToSend = cachedList.Messages
+					if len(messagesToSend) > 0 {
+						fromCache = true
+					}
+				} else {
+					// 反序列化失败，继续从数据库查询
+				}
+			}
+
+			if !fromCache {
+				// 缓存未命中或反序列化失败，从数据库查询
+				var sqlx string
+				if req.Prev {
+					sqlx = fmt.Sprintf("SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id < ? ORDER BY msg_id DESC LIMIT %d;", GetMessageOnce)
+				} else {
+					sqlx = fmt.Sprintf("SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id > ? ORDER BY msg_id ASC LIMIT %d;", GetMessageOnce)
+				}
+				sqlReq := &pbgtw.SqlRequest{
+					Sql: sqlx, // 每次最多拉取32条
+					Db:  pbgtw.SqlDatabases_Msg,
+					Params: []*pbgtw.InterFaceType{
+						{Response: &pbgtw.InterFaceType_Int64{Int64: req.Groupid}},
+						{Response: &pbgtw.InterFaceType_Int64{Int64: int64(lastMessageID)}},
+					},
+				}
+
+				sqlRes, err := gateway.ExecSQL(sqlReq)
+				if err != nil {
+					stream.Send(&pb.SyncMessageResponse{
+						Result: &pb.Result{
+							Code: errorcode.ServerInternalComponentError,
+							Msg:  "Failed to query historical messages",
+						}})
+					return err
+				}
+
+				if sqlRes.Result.Code != errorcode.Success {
+					stream.Send(&pb.SyncMessageResponse{
+						Result: &pb.Result{
+							Code: sqlRes.Result.Code,
+							Msg:  sqlRes.Result.Msg,
+						},
+						Time: time.Now().Unix(),
+					})
+					return fmt.Errorf("failed to query historical messages: %s", sqlRes.Result.Msg)
+				}
+
+				if len(sqlRes.Data) == 0 {
+					// 没有更多消息，退出循环
+					// 缓存空结果，避免缓存穿透
+					emptyCachedList := &pb.CachedMessageList{}
+					emptyBytes, _ := proto.Marshal(emptyCachedList)
+					gateway.ExecRedisBSet(&pbgtw.RedisSetBytesRequest{
+						DBID:  0,
+						Key:   cacheKey,
+						Value: emptyBytes,
+						Ttl:   CacheTTL, // 缓存空结果也设置 TTL
+					})
+					break
+				}
+
+				messagesToSend = make([]*pb.ReciveMessageListen, 0, len(sqlRes.Data))
+				for _, row := range sqlRes.Data {
+					receivedMsgNum++
+					if receivedMsgNum > int(req.Limit) {
+						break
+					}
+					msgID := row.Result[0].GetUint64()
+					groupID := row.Result[1].GetUint32()
+					msgContent := row.Result[2].GetStr()
+					msgTime := row.Result[3].GetInt64()
+					uid := row.Result[4].GetInt32()
+					fileHash := row.Result[5].GetStr()
+					msgType := row.Result[6].GetUint32()
+					msgSender := row.Result[7].GetStr()
+
+					// 处理 recall 消息
+					if msgType >= 16 { // 根据用户定义，type >= 16 表示 recall 消息
+						messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
+							Msgid:    int64(msgID),
+							Groupid:  int64(groupID),
+							Uid:      uid,
+							Type:     pb.MessageType(msgType),
+							Time:     msgTime,
+							Username: msgSender,
+							// Msg, Hash, Username 字段在此处留空，因为它们应该为 null
+						})
+					} else {
+						messagesToSend = append(messagesToSend, &pb.ReciveMessageListen{
+							Msgid:    int64(msgID),
+							Groupid:  int64(groupID),
+							Msg:      msgContent,
+							Uid:      uid,
+							Hash:     fileHash,
+							Type:     pb.MessageType(msgType),
+							Time:     msgTime,
+							Username: msgSender,
+						})
+					}
+				}
+
+				// 将查询结果写入缓存
+				cachedList := &pb.CachedMessageList{
+					Messages: messagesToSend,
+				}
+				cacheBytes, err := proto.Marshal(cachedList)
+				if err == nil {
+					_, err = gateway.ExecRedisBSet(&pbgtw.RedisSetBytesRequest{
+						DBID:  0, // 假设 DBID 为 0
+						Key:   cacheKey,
+						Value: cacheBytes,
+						Ttl:   CacheTTL,
+					})
+				}
+			}
+
+			// 如果当前批次没有有效消息，则跳过发送并继续下一轮查询
+			if len(messagesToSend) == 0 {
+				break // 避免无限循环，如果SQL返回数据但解析失败导致messagesToSend为空
+			}
+
+			lastMessageID = messagesToSend[len(messagesToSend)-1].Msgid
+			if lastMessageID <= 1 {
+				break
+			}
+
+			syncMsg := &pb.SyncMessageResponse{
+				Result: &pb.Result{
+					Code: errorcode.Success,
+					Msg:  "",
+				},
+				Time: time.Now().Unix(),
+				Msg:  messagesToSend,
+			}
+
+			// 尝试发送消息，如果失败则重试
+			sendSuccess := false
+			for range 2 { // 尝试发送2次
+				if err := stream.Send(syncMsg); err == nil {
+					sendSuccess = true
+					break
+				}
+				time.Sleep(time.Millisecond * 100) // 短暂等待后重试
+			}
+
+			if !sendSuccess {
+				return fmt.Errorf("failed to send sync message to client")
+			}
+
+			if receivedMsgNum >= int(req.Limit) {
+				break
+			}
+
+		}
+	}
+
+	if req.Sync {
+		// 等待客户端断开连接
+		<-stream.Context().Done()
+	}
 
 	return nil
 }
