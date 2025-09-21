@@ -136,7 +136,16 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 
 	var lastMessageID int64 = req.LastMsgid
 
-	if req.LastMsgid == 0 {
+	if req.LastMsgid == 0 && req.Prev {
+		lastMessageID = int64Max
+	}
+	if req.LastMsgid == -1 && !req.Prev {
+		lastMessageID = int64Max
+	} else if req.LastMsgid == -1 {
+		lastMessageID = int64Max
+	}
+
+	if req.LastMsgid < -1 {
 		lastMessageID = int64Max
 	}
 
@@ -147,7 +156,7 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 		useASCorDESC = "DESC"
 	}
 
-	if req.LastMsgid == 0 && !req.Prev {
+	if req.LastMsgid == -1 && !req.Prev {
 		// 无需加载历史
 	} else {
 		for {
