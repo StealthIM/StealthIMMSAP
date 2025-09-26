@@ -161,7 +161,7 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 	} else {
 		for {
 			// 构建 Redis 缓存键
-			cacheKey := fmt.Sprintf("msap:msg:history:%d:%d:%d:%s", req.Groupid, lastMessageID, req.Limit, useASCorDESC)
+			cacheKey := fmt.Sprintf("msap:msg:history:%d:%d:%s", req.Groupid, lastMessageID, useASCorDESC)
 
 			// 尝试从 Redis 缓存中获取消息
 			getRes, err := gateway.ExecRedisBGet(&pbgtw.RedisGetBytesRequest{
@@ -239,10 +239,10 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 
 				messagesToSend = make([]*pb.ReciveMessageListen, 0, len(sqlRes.Data))
 				for _, row := range sqlRes.Data {
-					receivedMsgNum++
-					if receivedMsgNum > int(req.Limit) {
-						break
-					}
+					// receivedMsgNum++
+					// if receivedMsgNum > int(req.Limit) {
+					// 	break
+					// }
 					msgID := row.Result[0].GetUint64()
 					groupID := row.Result[1].GetUint32()
 					msgContent := row.Result[2].GetStr()
@@ -300,6 +300,11 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 			lastMessageID = messagesToSend[len(messagesToSend)-1].Msgid
 			if lastMessageID <= 1 {
 				break
+			}
+
+			receivedMsgNum += len(messagesToSend)
+			if receivedMsgNum > int(req.Limit) {
+				messagesToSend = messagesToSend[:req.Limit]
 			}
 
 			syncMsg := &pb.SyncMessageResponse{
