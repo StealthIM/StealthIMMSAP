@@ -136,12 +136,7 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 
 	var lastMessageID int64 = req.LastMsgid
 
-	if req.LastMsgid == 0 && req.Prev {
-		lastMessageID = int64Max
-	}
-	if req.LastMsgid == -1 && !req.Prev {
-		lastMessageID = int64Max
-	} else if req.LastMsgid == -1 {
+	if req.LastMsgid == 0 {
 		lastMessageID = int64Max
 	}
 
@@ -151,17 +146,12 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 
 	receivedMsgNum := 0
 
-	useASCorDESC := "ASC"
-	if req.Prev {
-		useASCorDESC = "DESC"
-	}
-
-	if req.LastMsgid == -1 && !req.Prev {
+	if req.LastMsgid == -1 {
 		// 无需加载历史
 	} else {
 		for {
 			// 构建 Redis 缓存键
-			cacheKey := fmt.Sprintf("msap:msg:history:%d:%d:%s", req.Groupid, lastMessageID, useASCorDESC)
+			cacheKey := fmt.Sprintf("msap:msg:history:%d:%d", req.Groupid, lastMessageID)
 
 			// 尝试从 Redis 缓存中获取消息
 			getRes, err := gateway.ExecRedisBGet(&pbgtw.RedisGetBytesRequest{
@@ -188,11 +178,7 @@ func (s *server) SyncMessage(req *pb.SyncMessageRequest, stream grpc.ServerStrea
 			if !fromCache {
 				// 缓存未命中或反序列化失败，从数据库查询
 				var sqlx string
-				if req.Prev {
-					sqlx = fmt.Sprintf("SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id < ? ORDER BY msg_id DESC LIMIT %d;", GetMessageOnce)
-				} else {
-					sqlx = fmt.Sprintf("SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id > ? ORDER BY msg_id ASC LIMIT %d;", GetMessageOnce)
-				}
+				sqlx = fmt.Sprintf("SELECT msg_id, group_id, msg_content, msg_msgTime, msg_uid, msg_fileHash, msg_type, msg_sender FROM msg WHERE group_id = ? AND msg_id < ? ORDER BY msg_id DESC LIMIT %d;", GetMessageOnce)
 				sqlReq := &pbgtw.SqlRequest{
 					Sql: sqlx, // 每次最多拉取32条
 					Db:  pbgtw.SqlDatabases_Msg,

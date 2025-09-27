@@ -130,12 +130,28 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 			log.Printf("[SUBSCRIBER]Failed to publish message after retries: %v", err)
 			return fmt.Errorf("failed to publish message")
 		}
+		// go (func() { // 操作 Redis 清除缓存
+		// 	var err error
+		// 	for range 3 { // 最多重试3次
+		// 		_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
+		// 			DBID: 0,
+		// 			Key:  fmt.Sprintf("msap:msg:history:%d:%d:ASC", in.Content.Groupid, msgid),
+		// 		})
+		// 		if err == nil {
+		// 			break
+		// 		}
+		// 		time.Sleep(1 * time.Second)
+		// 	}
+		// 	if err != nil {
+		// 		log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
+		// 	}
+		// })()
 		go (func() { // 操作 Redis 清除缓存
 			var err error
 			for range 3 { // 最多重试3次
 				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
 					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:ASC", in.Content.Groupid, msgid),
+					Key:  fmt.Sprintf("msap:msg:history:%d:%d", in.Content.Groupid, msgid),
 				})
 				if err == nil {
 					break
@@ -146,44 +162,28 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 				log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
 			}
 		})()
+		// go (func() { // 操作 Redis 清除缓存
+		// 	var err error
+		// 	for range 3 { // 最多重试3次
+		// 		_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
+		// 			DBID: 0,
+		// 			Key:  fmt.Sprintf("msap:msg:history:%d:%d:ASC", in.Content.Groupid, int64Max),
+		// 		})
+		// 		if err == nil {
+		// 			break
+		// 		}
+		// 		time.Sleep(1 * time.Second)
+		// 	}
+		// 	if err != nil {
+		// 		log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
+		// 	}
+		// })()
 		go (func() { // 操作 Redis 清除缓存
 			var err error
 			for range 3 { // 最多重试3次
 				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
 					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:DESC", in.Content.Groupid, msgid),
-				})
-				if err == nil {
-					break
-				}
-				time.Sleep(1 * time.Second)
-			}
-			if err != nil {
-				log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
-			}
-		})()
-		go (func() { // 操作 Redis 清除缓存
-			var err error
-			for range 3 { // 最多重试3次
-				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
-					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:ASC", in.Content.Groupid, int64Max),
-				})
-				if err == nil {
-					break
-				}
-				time.Sleep(1 * time.Second)
-			}
-			if err != nil {
-				log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
-			}
-		})()
-		go (func() { // 操作 Redis 清除缓存
-			var err error
-			for range 3 { // 最多重试3次
-				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
-					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:DESC", in.Content.Groupid, int64Max),
+					Key:  fmt.Sprintf("msap:msg:history:%d:%d", in.Content.Groupid, int64Max),
 				})
 				if err == nil {
 					break
@@ -245,7 +245,7 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 			for range 3 { // 最多重试3次
 				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
 					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:ASC", in.Content.Groupid, in.Content.Msgid),
+					Key:  fmt.Sprintf("msap:msg:history:%d:%d", in.Content.Groupid, in.Content.Msgid),
 				})
 				if err == nil {
 					break
@@ -261,39 +261,7 @@ func SendMsg(in *pb.N_BroadcastMessage, msg *gonats.Msg) error {
 			for range 3 { // 最多重试3次
 				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
 					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:DESC", in.Content.Groupid, in.Content.Msgid),
-				})
-				if err == nil {
-					break
-				}
-				time.Sleep(1 * time.Second)
-			}
-			if err != nil {
-				log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
-			}
-		})()
-		go (func() { // 操作 Redis 清除缓存
-			var err error
-			for range 3 { // 最多重试3次
-				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
-					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:ASC", in.Content.Groupid, int64Max),
-				})
-				if err == nil {
-					break
-				}
-				time.Sleep(1 * time.Second)
-			}
-			if err != nil {
-				log.Printf("[SUBSCRIBER]Failed to delete message cache: %v", err)
-			}
-		})()
-		go (func() { // 操作 Redis 清除缓存
-			var err error
-			for range 3 { // 最多重试3次
-				_, err = gateway.ExecRedisDel(&pbgtw.RedisDelRequest{
-					DBID: 0,
-					Key:  fmt.Sprintf("msap:msg:history:%d:%d:DESC", in.Content.Groupid, int64Max),
+					Key:  fmt.Sprintf("msap:msg:history:%d:%d", in.Content.Groupid, int64Max),
 				})
 				if err == nil {
 					break
